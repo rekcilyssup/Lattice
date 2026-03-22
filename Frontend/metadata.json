@@ -1,0 +1,5 @@
+{
+  "name": "RAG Auditing Interface",
+  "description": "Enterprise-grade Document Retrieval RAG system interface with strict citation auditing.",
+  "requestFramePermissions": []
+}
