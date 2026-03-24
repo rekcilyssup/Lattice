@@ -6,6 +6,7 @@ from app.api.health import router as health_router
 from app.api.workspaces import router as workspaces_router
 from app.api.documents import router as documents_router
 from app.api.chat import router as chat_router
+from app.db.migrate import run_migrations_with_retry
 
 
 def create_app() -> FastAPI:
@@ -25,6 +26,11 @@ def create_app() -> FastAPI:
     app.include_router(workspaces_router, prefix=settings.API_BASE_PATH)
     app.include_router(documents_router, prefix=settings.API_BASE_PATH)
     app.include_router(chat_router, prefix=settings.API_BASE_PATH)
+
+    @app.on_event('startup')
+    def startup() -> None:
+        # Ensure schema exists even if developer forgot to run manual migration.
+        run_migrations_with_retry()
 
     return app
 

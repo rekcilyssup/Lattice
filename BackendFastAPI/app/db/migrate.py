@@ -1,3 +1,7 @@
+from __future__ import annotations
+
+import time
+from psycopg import OperationalError
 from app.db.connection import get_conn
 
 SQL = """
@@ -78,6 +82,21 @@ def run_migrations() -> None:
         conn.commit()
 
 
+def run_migrations_with_retry(max_attempts: int = 30, delay_seconds: float = 2.0) -> None:
+    last_error: Exception | None = None
+    for attempt in range(1, max_attempts + 1):
+        try:
+            run_migrations()
+            return
+        except OperationalError as exc:
+            last_error = exc
+            if attempt == max_attempts:
+                break
+            time.sleep(delay_seconds)
+    if last_error:
+        raise last_error
+
+
 if __name__ == '__main__':
-    run_migrations()
+    run_migrations_with_retry()
     print('Migrations complete')

@@ -59,7 +59,6 @@ export function ChatArea({
             ? {
                 ...msg,
                 isSearching: false,
-                isStreaming: false,
                 content: response.answer,
                 citations: response.citations,
               }
@@ -75,7 +74,6 @@ export function ChatArea({
             ? {
                 ...msg,
                 isSearching: false,
-                isStreaming: false,
                 content: `Error: ${message}`,
                 citations: [],
               }
@@ -121,7 +119,7 @@ export function ChatArea({
                 ) : (
                   <p>{msg.content}</p>
                 )}
-                {msg.isStreaming && <span className="inline-block w-1.5 h-4 ml-1 bg-zinc-400 animate-pulse align-middle" />}
+
               </div>
 
               {/* Citations */}

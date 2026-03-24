@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import uuid
 from pypdf import PdfReader
 from app.db.connection import get_conn
@@ -9,19 +10,11 @@ from app.utils.vector import to_pgvector
 from app.core.config import settings
 
 
-def _chunk_text(text: str, max_chars: int = 1200, overlap: int = 180) -> list[str]:
-    text = ' '.join(text.split())
-    if not text:
-        return []
-    chunks: list[str] = []
-    i = 0
-    while i < len(text):
-        end = min(len(text), i + max_chars)
-        chunks.append(text[i:end])
-        if end == len(text):
-            break
-        i = end - overlap
-    return chunks
+def _sanitize_text(raw: str) -> str:
+    # Some PDFs contain NUL bytes/control chars that Postgres TEXT cannot store.
+    cleaned = raw.replace('\x00', ' ')
+    cleaned = ''.join(ch if (ch >= ' ' or ch in '\n\r\t') else ' ' for ch in cleaned)
+    return cleaned
 
 
 async def ingest_document(document_id: str) -> None:
@@ -40,8 +33,9 @@ async def ingest_document(document_id: str) -> None:
         chunk_index = 0
 
         for p_idx, page in enumerate(reader.pages, start=1):
-            page_text = page.extract_text() or ''
-            for chunk in _chunk_text(page_text):
+            page_text = _sanitize_text(page.extract_text() or '')
+            for chunk in ai.split_text(page_text):
+                safe_chunk = _sanitize_text(chunk)
                 items.append(
                     {
                         'id': str(uuid.uuid4()),
@@ -49,9 +43,9 @@ async def ingest_document(document_id: str) -> None:
                         'document_id': doc['id'],
                         'chunk_index': chunk_index,
                         'page_number': p_idx,
-                        'content': chunk,
-                        'context_snippet': create_snippet(chunk, 360),
-                        'exact_quote': create_snippet(chunk, 180),
+                        'content': safe_chunk,
+                        'context_snippet': create_snippet(safe_chunk, 360),
+                        'exact_quote': create_snippet(safe_chunk, 180),
                         'metadata': {'documentName': doc['name'], **(doc.get('metadata') or {})},
                     }
                 )
@@ -80,7 +74,7 @@ async def ingest_document(document_id: str) -> None:
                             it['content'],
                             it['context_snippet'],
                             it['exact_quote'],
-                            json_dumps(it['metadata']),
+                            json.dumps(it['metadata']),
                             to_pgvector(vectors[i], settings.EMBEDDING_DIMENSION),
                         ),
                     )
@@ -97,7 +91,3 @@ async def ingest_document(document_id: str) -> None:
             conn.commit()
 
 
-def json_dumps(value: dict) -> str:
-    import json
-
-    return json.dumps(value)

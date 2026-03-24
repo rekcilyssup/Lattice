@@ -1,84 +1,200 @@
 from __future__ import annotations
 
+import asyncio
 import json
-import httpx
+import re
+from langchain.chains.combine_documents import create_stuff_documents_chain
+from langchain_core.documents import Document
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_ollama import ChatOllama, OllamaEmbeddings
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+
 from app.core.config import settings
-from app.utils.text import create_snippet
+from app.utils.query import is_metric_query, is_temporal_query, is_technical_query, is_social_query, is_multi_part_query
 from app.utils.vector import normalize
 
 
 class AIService:
+    def __init__(self) -> None:
+        self._splitter = RecursiveCharacterTextSplitter(chunk_size=1200, chunk_overlap=180)
+
+    def split_text(self, text: str) -> list[str]:
+        normalized = ' '.join(text.split())
+        if not normalized:
+            return []
+        return self._splitter.split_text(normalized)
+
     async def embed(self, texts: list[str]) -> list[list[float]]:
         if not texts:
             return []
+
         provider = settings.EMBEDDING_PROVIDER.lower()
         if provider == 'ollama':
-            return [await self._embed_ollama(t) for t in texts]
-        return [self._embed_mock(t) for t in texts]
+            return await self._embed_ollama(texts)
 
-    async def _embed_ollama(self, text: str) -> list[float]:
-        async with httpx.AsyncClient(timeout=60) as client:
-            resp = await client.post(
-                f"{settings.OLLAMA_BASE_URL}/api/embeddings",
-                json={"model": settings.OLLAMA_EMBEDDING_MODEL, "prompt": text},
-            )
-            resp.raise_for_status()
-            emb = resp.json().get('embedding', [])
-            return normalize([float(x) for x in emb])
+        raise ValueError(f"Unsupported EMBEDDING_PROVIDER '{settings.EMBEDDING_PROVIDER}'. Configure a supported AI embedding provider.")
 
-    def _embed_mock(self, text: str) -> list[float]:
-        vec = [0.0] * settings.EMBEDDING_DIMENSION
-        for i, ch in enumerate(text):
-            vec[i % settings.EMBEDDING_DIMENSION] += ord(ch) / 255.0
-        return normalize(vec)
+    async def _embed_ollama(self, texts: list[str]) -> list[list[float]]:
+        embedder = OllamaEmbeddings(
+            model=settings.OLLAMA_EMBEDDING_MODEL,
+            base_url=settings.OLLAMA_BASE_URL,
+        )
 
-    async def generate_answer(self, query: str, contexts: list[dict]) -> dict:
+        vectors = await asyncio.to_thread(embedder.embed_documents, texts)
+        return [normalize([float(x) for x in v]) for v in vectors]
+
+    async def generate_answer(self, query: str, contexts: list[dict], chat_history: list[dict] | None = None) -> dict:
         if not contexts:
-            return {"answer": "Information not found.", "citationIds": []}
+            return {'answer': 'Information not found.', 'citationIds': []}
 
         provider = settings.LLM_PROVIDER.lower()
         if provider == 'ollama':
-            return await self._answer_ollama(query, contexts)
+            return await self._answer_ollama_chain(query, contexts, chat_history or [])
 
-        first = contexts[0]
-        return {"answer": create_snippet(first['content'], 260), "citationIds": [first['citationId']]}
+        raise ValueError(f"Unsupported LLM_PROVIDER '{settings.LLM_PROVIDER}'. Configure a supported AI model provider.")
 
-    async def _answer_ollama(self, query: str, contexts: list[dict]) -> dict:
-        system = (
-            'You are a strict retrieval QA assistant. '
-            'Only answer from supplied context chunks. '
-            'If answer is absent, respond with "Information not found." and empty citationIds. '
-            'Return ONLY valid JSON with schema: {"answer": string, "citationIds": string[]}. '
+    async def _answer_ollama_chain(self, query: str, contexts: list[dict], chat_history: list[dict]) -> dict:
+        metric_instructions = (
+            'The user is asking for quantitative details. '
+            'Extract exact values, units, and counts exactly as written in context '
+            '(for example: 726 MLD, 179 waterbodies, 16 ponds). '
+            'If multiple metrics are requested, include each explicitly in the answer. '
+            'Do not approximate, normalize, or invent values. '
+        ) if is_metric_query(query) else ''
+        temporal_instructions = (
+            'The user is asking for timeline/phase details. '
+            'Include exact phase/stage/year labels and associated values exactly as written '
+            '(for example: Years 1-3, Years 4-5, Year 6+, 5-minute latency). '
+            'Preserve chronological order in the answer. '
+        ) if is_temporal_query(query) else ''
+        technical_instructions = (
+            'The user is asking for technical architecture details. '
+            'Explicitly name models, algorithms, and framework terms exactly as written '
+            '(for example: U-Net CNN, LSTM, ResNet-50, contrastive learning, XGBoost). '
+            'If the question asks "which" or "what architecture", answer with direct model names first. '
+        ) if is_technical_query(query) else ''
+        social_instructions = (
+            'The user is asking about social or operational adoption. '
+            'Explicitly state actors/groups and their roles (for example: youth, elders, community members, departments). '
+            'Do not replace role details with generic summaries. '
+        ) if is_social_query(query) else ''
+        is_multi_part = is_multi_part_query(query)
+
+        length_instruction = (
+            'The question has multiple sub-parts or requires detailed explanation. '
+            'Write a COMPLETE answer addressing EVERY sub-part — do NOT limit to 2 sentences. '
+            'Use numbered points or separate sentences per sub-part. '
+            'If one sub-part is unsupported by context, include "Information not found." only for that sub-part. '
+        ) if is_multi_part else (
+            'For direct entity/title questions, return a short exact phrase. '
+            'For all other questions, keep the answer concise (2-4 sentences max). '
         )
 
-        context_text = "\n\n".join(
-            [f"[{c['citationId']}] {c['documentName']} page {c['pageNumber']}\nContent: {c['content']}" for c in contexts]
+        prompt = ChatPromptTemplate.from_messages(
+            [
+                (
+                    'system',
+                    (
+                        'You are a strict retrieval QA assistant for document-grounded answers. '
+                        'Only use supplied context chunks and never use outside knowledge. '
+                        'Each chunk is labeled like [C1], [C2], etc. '
+                        'If evidence is missing or ambiguous, respond exactly with "Information not found." and empty citationIds. '
+                        f'{length_instruction}'
+                        f'{metric_instructions}'
+                        f'{temporal_instructions}'
+                        f'{technical_instructions}'
+                        f'{social_instructions}'
+                        'Include only citation IDs that directly support the final answer, maximum 2 IDs. '
+                        'Use chat history only for conversational continuity, not as factual source. '
+                        'Return ONLY valid JSON with schema: {{"answer": string, "citationIds": string[]}}. '
+                    ),
+                ),
+                ('human', 'Chat History:\n{history}\n\nQuestion: {query}\n\nContext:\n{context}'),
+            ]
         )
 
-        user = f"Question: {query}\n\nContext:\n{context_text}"
-
-        async with httpx.AsyncClient(timeout=120) as client:
-            resp = await client.post(
-                f"{settings.OLLAMA_BASE_URL}/api/chat",
-                json={
-                    "model": settings.LLM_MODEL,
-                    "stream": False,
-                    "format": "json",
-                    "options": {"temperature": settings.LLM_TEMPERATURE},
-                    "messages": [
-                        {"role": "system", "content": system},
-                        {"role": "user", "content": user},
-                    ],
+        docs = [
+            Document(
+                page_content=f"[{c['citationId']}] {c['documentName']} page {c['pageNumber']}\n{c['content']}",
+                metadata={
+                    'citationId': c['citationId'],
+                    'documentName': c['documentName'],
+                    'pageNumber': c['pageNumber'],
                 },
             )
-            resp.raise_for_status()
-            content = resp.json().get('message', {}).get('content', '{}')
+            for c in contexts
+        ]
+        history_text = '\n'.join([f"{m['role']}: {m['content']}" for m in chat_history[-6:]]) or 'None'
+
+        llm = ChatOllama(
+            model=settings.LLM_MODEL,
+            base_url=settings.OLLAMA_BASE_URL,
+            temperature=settings.LLM_TEMPERATURE,
+            format='json',
+        )
+
+        qa_chain = create_stuff_documents_chain(llm=llm, prompt=prompt)
 
         try:
-            payload = json.loads(content)
-            return {
-                "answer": (payload.get('answer') or 'Information not found.').strip(),
-                "citationIds": payload.get('citationIds') or [],
-            }
+            raw = await qa_chain.ainvoke({'input': query, 'query': query, 'context': docs, 'history': history_text})
+        except Exception as exc:
+            raise RuntimeError(
+                f"AI generation failed via Ollama ({type(exc).__name__}): {exc}. "
+                "Verify Ollama is running and the configured model is available."
+            ) from exc
+
+        return self._coerce_qa_payload(raw, contexts)
+
+    def _coerce_qa_payload(self, raw: object, contexts: list[dict]) -> dict:
+        text = str(raw or '').strip()
+        if not text:
+            return {'answer': 'Information not found.', 'citationIds': []}
+
+        payload = self._extract_json_payload(text)
+        if payload is not None:
+            answer = str(payload.get('answer') or '').strip() or 'Information not found.'
+            citation_ids = payload.get('citationIds') or []
+            citation_ids = self._normalize_citation_ids(citation_ids)
+            if answer.lower() == 'information not found.':
+                citation_ids = []
+            return {'answer': answer, 'citationIds': citation_ids}
+
+        # If JSON is malformed, still return the model text (AI-generated),
+        # and let the chat service attach top retrieved citations.
+        return {'answer': text, 'citationIds': []}
+
+    def _extract_json_payload(self, text: str) -> dict | None:
+        try:
+            obj = json.loads(text)
+            if isinstance(obj, dict):
+                return obj
         except Exception:
-            return {"answer": "Information not found.", "citationIds": []}
+            pass
+
+        match = re.search(r'\{.*\}', text, flags=re.DOTALL)
+        if not match:
+            return None
+
+        try:
+            obj = json.loads(match.group(0))
+            if isinstance(obj, dict):
+                return obj
+        except Exception:
+            return None
+
+        return None
+
+    def _normalize_citation_ids(self, citation_ids: list) -> list[str]:
+        normalized: list[str] = []
+        for item in citation_ids:
+            if not isinstance(item, (str, int)):
+                continue
+            cid = str(item).strip().upper()
+            if not cid:
+                continue
+            if cid.isdigit():
+                cid = f"C{cid}"
+            if cid.startswith('C') and cid[1:].isdigit() and cid not in normalized:
+                normalized.append(cid)
+        return normalized
+

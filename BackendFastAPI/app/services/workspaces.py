@@ -3,6 +3,13 @@ import uuid
 from app.db.connection import get_conn
 
 
+def _normalize_workspace_id(workspace_id: str) -> str | None:
+    try:
+        return str(uuid.UUID(str(workspace_id)))
+    except Exception:
+        return None
+
+
 def _get_documents(workspace_id: str) -> list[dict]:
     with get_conn() as conn:
         with conn.cursor() as cur:
@@ -46,9 +53,13 @@ def create_workspace(name: str) -> dict:
 
 
 def get_workspace(workspace_id: str) -> dict | None:
+    normalized_workspace_id = _normalize_workspace_id(workspace_id)
+    if not normalized_workspace_id:
+        return None
+
     with get_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute("SELECT id, name FROM workspaces WHERE id=%s", (workspace_id,))
+            cur.execute("SELECT id, name FROM workspaces WHERE id=%s", (normalized_workspace_id,))
             row = cur.fetchone()
             if not row:
                 return None
@@ -56,8 +67,8 @@ def get_workspace(workspace_id: str) -> dict | None:
     return {
         'id': row['id'],
         'name': row['name'],
-        'documents': _get_documents(workspace_id),
-        'messages': _get_messages(workspace_id),
+        'documents': _get_documents(normalized_workspace_id),
+        'messages': _get_messages(normalized_workspace_id),
     }
 
 

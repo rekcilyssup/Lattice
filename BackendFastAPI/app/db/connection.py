@@ -5,13 +5,16 @@ from app.core.config import settings
 
 
 def _dsn() -> str:
-    return (
+    dsn = (
         f"host={settings.POSTGRES_HOST} "
         f"port={settings.POSTGRES_PORT} "
         f"dbname={settings.POSTGRES_DB} "
         f"user={settings.POSTGRES_USER} "
         f"password={settings.POSTGRES_PASSWORD}"
     )
+    if settings.POSTGRES_SSL:
+        dsn += " sslmode=require"
+    return dsn
 
 
 @contextmanager

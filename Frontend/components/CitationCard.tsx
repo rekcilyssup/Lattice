@@ -6,12 +6,12 @@ export function CitationCard({ citation, onClick }: { citation: Citation; onClic
   const renderContext = () => {
     const parts = citation.context_snippet.split(citation.exact_quote);
     if (parts.length === 1) return <span className="italic text-zinc-500">{citation.context_snippet}</span>;
-    
+
     return (
       <span className="italic text-zinc-500 leading-relaxed">
         {parts[0]}
         <strong className="font-semibold text-zinc-900 not-italic bg-yellow-100/80 px-1 py-0.5 mx-0.5 rounded border border-yellow-200/50 shadow-sm">{citation.exact_quote}</strong>
-        {parts[1]}
+        {parts.slice(1).join(citation.exact_quote)}
       </span>
     );
   };

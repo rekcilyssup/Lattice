@@ -7,7 +7,8 @@ Python FastAPI backend for the same frontend API contract.
 - FastAPI
 - PostgreSQL + pgvector
 - psycopg
-- Ollama/OpenAI/Gemini-ready AI layer
+- LangChain orchestration layer
+- Ollama/OpenAI/Gemini-ready AI providers
 
 ## Run Locally
 
@@ -44,6 +45,11 @@ python -m app.db.migrate
 uvicorn app.main:app --reload --port 8080
 ```
 
+Note:
+
+- Server startup now auto-runs migrations with retry.
+- Manual migration command is still useful for explicit checks.
+
 Health:
 
 ```bash
@@ -69,3 +75,13 @@ NEXT_PUBLIC_API_BASE_URL=http://localhost:8080/api/v1
 ```
 
 No frontend code changes required.
+
+## LangChain Usage
+
+This backend now uses LangChain primitives for core RAG orchestration:
+
+- `RecursiveCharacterTextSplitter` for chunking
+- `OllamaEmbeddings` for embeddings
+- `ChatPromptTemplate` + `ChatOllama` + `JsonOutputParser` for grounded answer generation
+
+Retrieval/rerank and API contract stay the same.
