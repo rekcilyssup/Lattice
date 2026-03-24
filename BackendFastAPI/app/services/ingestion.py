@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from pypdf import PdfReader
+from langchain_community.document_loaders import PyPDFLoader
 from app.db.connection import get_conn
 from app.services.ai import AIService
 from app.utils.text import create_snippet
@@ -28,28 +28,32 @@ async def ingest_document(document_id: str) -> None:
                 return
 
     try:
-        reader = PdfReader(doc['storage_path'])
+        # Load the document using LangChain's loader to preserve cross-page context
+        loader = PyPDFLoader(doc['storage_path'])
+        langchain_docs = loader.load()
+        
+        # Split the document as a whole. This ensures chunk_overlap bridges page breaks!
+        split_docs = ai._splitter.split_documents(langchain_docs)
+        
         items: list[dict] = []
-        chunk_index = 0
-
-        for p_idx, page in enumerate(reader.pages, start=1):
-            page_text = _sanitize_text(page.extract_text() or '')
-            for chunk in ai.split_text(page_text):
-                safe_chunk = _sanitize_text(chunk)
-                items.append(
-                    {
-                        'id': str(uuid.uuid4()),
-                        'workspace_id': doc['workspace_id'],
-                        'document_id': doc['id'],
-                        'chunk_index': chunk_index,
-                        'page_number': p_idx,
-                        'content': safe_chunk,
-                        'context_snippet': create_snippet(safe_chunk, 360),
-                        'exact_quote': create_snippet(safe_chunk, 180),
-                        'metadata': {'documentName': doc['name'], **(doc.get('metadata') or {})},
-                    }
-                )
-                chunk_index += 1
+        for chunk_index, chunk in enumerate(split_docs):
+            safe_chunk = _sanitize_text(chunk.page_content)
+            # PyPDFLoader stores the page number (0-indexed) in metadata
+            p_idx = chunk.metadata.get('page', 0) + 1 
+            
+            items.append(
+                {
+                    'id': str(uuid.uuid4()),
+                    'workspace_id': doc['workspace_id'],
+                    'document_id': doc['id'],
+                    'chunk_index': chunk_index,
+                    'page_number': p_idx,
+                    'content': safe_chunk,
+                    'context_snippet': create_snippet(safe_chunk, 360),
+                    'exact_quote': create_snippet(safe_chunk, 180),
+                    'metadata': {'documentName': doc['name'], **(doc.get('metadata') or {})},
+                }
+            )
 
         vectors = await ai.embed([x['content'] for x in items])
 
@@ -89,5 +93,3 @@ async def ingest_document(document_id: str) -> None:
                     (str(e), doc['id']),
                 )
             conn.commit()
-
-

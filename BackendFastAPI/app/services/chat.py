@@ -200,7 +200,7 @@ def _select_context_chunks(query: str, reranked: list[dict]) -> list[dict]:
     if is_multi_part_query(query):
         # Multi-part questions need more context to answer every sub-part.
         min_score = max(0.12, top_score * 0.28)
-        limit = 8
+        limit = 15
     elif is_metric_query(query):
         min_score = max(0.16, top_score * 0.35)
         limit = 6
@@ -215,7 +215,7 @@ def _select_context_chunks(query: str, reranked: list[dict]) -> list[dict]:
         limit = 6
     else:
         min_score = max(0.20, top_score * 0.45)
-        limit = 5
+        limit = 10
 
     selected = [c for c in reranked if float(c.get('rerank_score', 0.0) or 0.0) >= min_score]
 
@@ -456,9 +456,8 @@ async def ask_question(workspace_id: str, query: str) -> dict:
             {
                 **x,
                 'rerank_score': (
-                    overlap_score(query, x['content']) * 0.5
-                    + x.get('dense_score', 0.0) * 0.2
-                    + x.get('sparse_score', 0.0) * 0.1
+                    x.get('fused_score', 0.0) * 50.0  # <-- THE MAGIC FIX: Scales RRF to a 0.1 - 0.8 range
+                    + overlap_score(query, x['content']) * 0.2
                     + _title_boost(query, x)
                     + _metric_boost(query, x)
                     + _temporal_boost(query, x)

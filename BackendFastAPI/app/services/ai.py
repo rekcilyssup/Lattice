@@ -13,6 +13,8 @@ from app.core.config import settings
 from app.utils.query import is_metric_query, is_temporal_query, is_technical_query, is_social_query, is_multi_part_query
 from app.utils.vector import normalize
 
+#for groq
+from langchain_groq import ChatGroq
 
 class AIService:
     def __init__(self) -> None:
@@ -34,9 +36,10 @@ class AIService:
 
         raise ValueError(f"Unsupported EMBEDDING_PROVIDER '{settings.EMBEDDING_PROVIDER}'. Configure a supported AI embedding provider.")
 
+    # In ai.py
     async def _embed_ollama(self, texts: list[str]) -> list[list[float]]:
         embedder = OllamaEmbeddings(
-            model=settings.OLLAMA_EMBEDDING_MODEL,
+            model="nomic-embed-text", # This MUST be nomic-embed-text for 768 dims
             base_url=settings.OLLAMA_BASE_URL,
         )
 
@@ -98,15 +101,14 @@ class AIService:
                         'You are a strict retrieval QA assistant for document-grounded answers. '
                         'Only use supplied context chunks and never use outside knowledge. '
                         'Each chunk is labeled like [C1], [C2], etc. '
-                        'If evidence is missing or ambiguous, respond exactly with "Information not found." and empty citationIds. '
                         f'{length_instruction}'
                         f'{metric_instructions}'
                         f'{temporal_instructions}'
                         f'{technical_instructions}'
                         f'{social_instructions}'
-                        'Include only citation IDs that directly support the final answer, maximum 2 IDs. '
-                        'Use chat history only for conversational continuity, not as factual source. '
-                        'Return ONLY valid JSON with schema: {{"answer": string, "citationIds": string[]}}. '
+                        'You MUST return ONLY valid JSON with EXACTLY these two keys: "answer" and "citationIds". '
+                        'Do NOT add any other keys to the JSON object. '
+                        'Example Output: {{"answer": "The project uses U-Net CNN.", "citationIds": ["C1"]}}'
                     ),
                 ),
                 ('human', 'Chat History:\n{history}\n\nQuestion: {query}\n\nContext:\n{context}'),
@@ -126,11 +128,20 @@ class AIService:
         ]
         history_text = '\n'.join([f"{m['role']}: {m['content']}" for m in chat_history[-6:]]) or 'None'
 
+        """
         llm = ChatOllama(
             model=settings.LLM_MODEL,
             base_url=settings.OLLAMA_BASE_URL,
             temperature=settings.LLM_TEMPERATURE,
             format='json',
+        )
+        """
+        # The Free Groq Drop-In:
+        llm = ChatGroq(
+            api_key="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", 
+            model_name="llama-3.3-70b-versatile", 
+            temperature=settings.LLM_TEMPERATURE,
+            model_kwargs={"response_format": {"type": "json_object"}} # Forces strict JSON output
         )
 
         qa_chain = create_stuff_documents_chain(llm=llm, prompt=prompt)
