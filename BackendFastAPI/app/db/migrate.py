@@ -38,7 +38,7 @@ CREATE TABLE IF NOT EXISTS chunks (
   context_snippet TEXT NOT NULL,
   exact_quote TEXT NOT NULL,
   metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
-  embedding VECTOR(1536) NOT NULL,
+  embedding VECTOR(768) NOT NULL,
   search_vector TSVECTOR GENERATED ALWAYS AS (to_tsvector('english', content)) STORED,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
