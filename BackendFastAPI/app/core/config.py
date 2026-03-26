@@ -19,12 +19,13 @@ class Settings(BaseSettings):
 
     UPLOAD_DIR: str = 'storage/uploads'
     MAX_FILE_SIZE_MB: int = 20
-    EMBEDDING_DIMENSION: int = 1536
+    EMBEDDING_DIMENSION: int = 768
 
     EMBEDDING_PROVIDER: str = 'ollama'
     EMBEDDING_MODEL: str = 'text-embedding-3-small'
     OLLAMA_BASE_URL: str = 'http://localhost:11434'
     OLLAMA_EMBEDDING_MODEL: str = 'nomic-embed-text'
+    ALLOW_LOCAL_EMBEDDING_FALLBACK: bool = True
 
     LLM_PROVIDER: str = 'ollama'
     LLM_MODEL: str = 'llama3.2:1b'

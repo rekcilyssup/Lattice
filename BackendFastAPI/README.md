@@ -8,7 +8,8 @@ Python FastAPI backend for the same frontend API contract.
 - PostgreSQL + pgvector
 - psycopg
 - LangChain orchestration layer
-- Ollama/OpenAI/Gemini-ready AI providers
+- Ollama embeddings for ingestion + dense retrieval
+- Groq chat model integration for answer generation
 
 ## Run Locally
 
@@ -66,6 +67,36 @@ curl http://localhost:8080/api/v1/health
 - `POST /api/v1/workspaces/{workspace_id}/documents/upload`
 - `POST /api/v1/workspaces/{workspace_id}/chat`
 
+## How Indexing Works
+
+When you upload a PDF, backend indexing does the following:
+
+1. Reads PDF pages using `PyPDFLoader`
+2. Splits text into chunks (`RecursiveCharacterTextSplitter`)
+3. Generates embeddings for each chunk
+4. Stores chunks + vectors in Postgres (`chunks.embedding`)
+
+Because embeddings are generated during indexing, the embedding provider must be available at upload time.
+
+## AI Configuration
+
+Environment keys in `.env`:
+
+- `EMBEDDING_PROVIDER` (current implementation expects `ollama`)
+- `OLLAMA_BASE_URL` (default `http://localhost:11434`)
+- `OLLAMA_EMBEDDING_MODEL` (default `nomic-embed-text`)
+- `EMBEDDING_DIMENSION` (must match DB vector size; default `768`)
+- `LLM_PROVIDER`, `LLM_MODEL`, `LLM_TEMPERATURE`
+
+If indexing fails with an Ollama connection error, start Ollama and ensure the embedding model exists.
+
+Example:
+
+```bash
+ollama serve
+ollama pull nomic-embed-text
+```
+
 ## Frontend Integration
 
 Set frontend env:
@@ -82,6 +113,6 @@ This backend now uses LangChain primitives for core RAG orchestration:
 
 - `RecursiveCharacterTextSplitter` for chunking
 - `OllamaEmbeddings` for embeddings
-- `ChatPromptTemplate` + `ChatOllama` + `JsonOutputParser` for grounded answer generation
+- `ChatPromptTemplate` + chat model chain for grounded answer generation
 
 Retrieval/rerank and API contract stay the same.
