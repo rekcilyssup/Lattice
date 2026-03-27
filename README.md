@@ -13,7 +13,7 @@ Full-stack RAG application with:
 - `Docs/` - architecture and requirements docs
 
 ## Project Architechture
-
+```
                 ┌──────────────────────────────┐
                 │         FRONTEND             │
                 │  (React / UI / Chat screen) │
@@ -68,6 +68,8 @@ Full-stack RAG application with:
                 │     LLM (Groq / Ollama)      │
                 │   Answer generation layer    │
                 └──────────────────────────────┘
+
+```
 
 ## Prerequisites
 
