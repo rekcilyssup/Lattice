@@ -12,6 +12,63 @@ Full-stack RAG application with:
 - `BackendFastAPI/` - API server + migrations
 - `Docs/` - architecture and requirements docs
 
+## Project Architechture
+
+                ┌──────────────────────────────┐
+                │         FRONTEND             │
+                │  (React / UI / Chat screen) │
+                └──────────────┬──────────────┘
+                               │
+                               ▼
+                ┌──────────────────────────────┐
+                │        FASTAPI API           │
+                │   (app/api/*.py routes)     │
+                └──────────────┬──────────────┘
+                               │
+             ┌─────────────────┴─────────────────┐
+             │                                   │
+             ▼                                   ▼
+
+   ┌──────────────────────┐           ┌──────────────────────┐
+   │  DOCUMENT INGESTION  │           │     CHAT SERVICE     │
+   │ (services/ingestion) │           │  (services/chat.py)  │
+   └──────────┬───────────┘           └──────────┬───────────┘
+              │                                  │
+              ▼                                  ▼
+
+   ┌──────────────────────┐           ┌──────────────────────────┐
+   │      AI SERVICE      │           │   RETRIEVAL PIPELINE     │
+   │   (services/ai.py)   │           │                          │
+   └──────────┬───────────┘           │  Dense Search (vector)   │
+              │                       │  Sparse Search (keyword) │
+              ▼                       │  Hybrid Fusion           │
+                                      │  Reranking               │
+   ┌──────────────────────┐           └──────────┬───────────────┘
+   │  CHUNK + EMBEDDING   │                      │
+   │                      │                      ▼
+   │  Split document      │          ┌──────────────────────────┐
+   │  → Create chunks     │          │   CONTEXT SELECTION      │
+   │  → Embed chunks      │          │  (best chunks chosen)    │
+   └──────────┬───────────┘          └──────────┬───────────────┘
+              │                                 │
+              ▼                                 ▼
+
+   ┌────────────────────────────────────────────────────────────┐
+   │                    POSTGRES DATABASE                       │
+   │                                                            │
+   │  documents  → file metadata                                │
+   │  chunks     → text + embeddings + search_vector            │
+   │  messages   → chat history                                 │
+   │  audit_logs → retrieval trace                              │
+   └────────────────────────────────────────────────────────────┘
+                                 ▲
+                                 │
+                                 ▼
+                ┌──────────────────────────────┐
+                │     LLM (Groq / Ollama)      │
+                │   Answer generation layer    │
+                └──────────────────────────────┘
+
 ## Prerequisites
 
 - Python 3.11+

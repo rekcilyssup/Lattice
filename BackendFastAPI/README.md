@@ -84,7 +84,7 @@ Environment keys in `.env`:
 
 - `EMBEDDING_PROVIDER` (current implementation expects `ollama`)
 - `OLLAMA_BASE_URL` (default `http://localhost:11434`)
-- `OLLAMA_EMBEDDING_MODEL` (default `nomic-embed-text`)
+- `EMBEDDING_MODEL` (example: `nomic-embed-text`)
 - `EMBEDDING_DIMENSION` (must match DB vector size; default `768`)
 - `LLM_PROVIDER`, `LLM_MODEL`, `LLM_TEMPERATURE`
 
