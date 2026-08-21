@@ -33,6 +33,7 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: str = ''
     GEMINI_API_KEY: str = ''
     COHERE_API_KEY: str = ''
+    GROQ_API_KEY: str = ''
     RERANK_PROVIDER: str = 'heuristic'
     TOP_K_DENSE: int = 15
     TOP_K_SPARSE: int = 15

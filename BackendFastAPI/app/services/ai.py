@@ -51,12 +51,15 @@ class AIService:  # Main AI service class for handling embeddings and responses
             return {'answer': 'Information not found.', 'citationIds': []}  # Returns default response when no context available
 
         provider = settings.LLM_PROVIDER.lower()  # Gets LLM provider from settings and converts to lowercase
+        if provider == 'groq':  # Checks if provider is set to Groq
+            return await self._answer_groq_chain(query, contexts, chat_history or [])  # Calls Groq-specific answer method
+
         if provider == 'ollama':  # Checks if provider is set to Ollama
             return await self._answer_ollama_chain(query, contexts, chat_history or [])  # Calls Ollama-specific answer method
 
         raise ValueError(f"Unsupported LLM_PROVIDER '{settings.LLM_PROVIDER}'. Configure a supported AI model provider.")  # Raises error for unsupported LLM providers
 
-    async def _answer_ollama_chain(self, query: str, contexts: list[dict], chat_history: list[dict]) -> dict:  # Private method to create and execute Ollama answer chain
+    def _build_qa_prompt(self, query: str):  # Builds the system/human prompt, adapting instructions to the query type
         metric_instructions = (  # Defines instructions for metric-related queries
             'The user is asking for quantitative details. '
             'Extract exact values, units, and counts exactly as written in context '
@@ -93,7 +96,7 @@ class AIService:  # Main AI service class for handling embeddings and responses
             'For all other questions, keep the answer concise (2-4 sentences max). '
         )  # Otherwise applies concise answer instructions
 
-        prompt = ChatPromptTemplate.from_messages(  # Creates chat prompt template with system and human messages
+        return ChatPromptTemplate.from_messages(  # Creates chat prompt template with system and human messages
             [
                 (
                     'system',  # System message containing instructions for the AI
@@ -115,46 +118,59 @@ class AIService:  # Main AI service class for handling embeddings and responses
             ]
         )
 
-        docs = [  # Creates list of Document objects from context dictionaries
-            Document(  # Creates individual Document instances
-                page_content=f"[{c['citationId']}] {c['documentName']} page {c['pageNumber']}\n{c['content']}",  # Formats page content with citation ID and document info
-                metadata={  # Sets metadata for each document
-                    'citationId': c['citationId'],  # Stores citation ID in metadata
-                    'documentName': c['documentName'],  # Stores document name in metadata
-                    'pageNumber': c['pageNumber'],  # Stores page number in metadata
+    @staticmethod
+    def _format_context_docs(contexts: list[dict]) -> list[Document]:  # Converts context dicts into LangChain Documents with citation labels
+        return [
+            Document(
+                page_content=f"[{c['citationId']}] {c['documentName']} page {c['pageNumber']}\n{c['content']}",
+                metadata={
+                    'citationId': c['citationId'],
+                    'documentName': c['documentName'],
+                    'pageNumber': c['pageNumber'],
                 },
             )
-            for c in contexts  # Iterates through all contexts to create documents
+            for c in contexts
         ]
-        history_text = '\n'.join([f"{m['role']}: {m['content']}" for m in chat_history[-6:]]) or 'None'  # Joins last 6 history messages or shows 'None'
 
-        """
+    async def _run_qa_chain(self, llm, query: str, contexts: list[dict], chat_history: list[dict], provider_label: str) -> dict:  # Runs the QA chain with any provider and normalizes the payload
+        prompt = self._build_qa_prompt(query)
+        docs = self._format_context_docs(contexts)
+        history_text = '\n'.join([f"{m['role']}: {m['content']}" for m in chat_history[-6:]]) or 'None'
+
+        qa_chain = create_stuff_documents_chain(llm=llm, prompt=prompt)
+
+        try:
+            raw = await qa_chain.ainvoke({'input': query, 'query': query, 'context': docs, 'history': history_text})
+        except Exception as exc:
+            raise RuntimeError(
+                f"AI generation failed via {provider_label} ({type(exc).__name__}): {exc}. "
+                f"Verify the {provider_label} configuration and that the configured model is available."
+            ) from exc
+
+        return self._coerce_qa_payload(raw, contexts)
+
+    async def _answer_groq_chain(self, query: str, contexts: list[dict], chat_history: list[dict]) -> dict:  # Private method to create and execute Groq answer chain
+        if not settings.GROQ_API_KEY:
+            raise RuntimeError('GROQ_API_KEY is not configured. Set it in BackendFastAPI/.env (see .env.example).')
+
+        llm = ChatGroq(
+            api_key=settings.GROQ_API_KEY,
+            model_name=settings.LLM_MODEL,
+            temperature=settings.LLM_TEMPERATURE,
+            model_kwargs={"response_format": {"type": "json_object"}},  # Forces strict JSON output
+        )
+
+        return await self._run_qa_chain(llm, query, contexts, chat_history, 'Groq')
+
+    async def _answer_ollama_chain(self, query: str, contexts: list[dict], chat_history: list[dict]) -> dict:  # Private method to create and execute Ollama answer chain
         llm = ChatOllama(
             model=settings.LLM_MODEL,
             base_url=settings.OLLAMA_BASE_URL,
             temperature=settings.LLM_TEMPERATURE,
             format='json',
         )
-        """
-        # The Free Groq Drop-In: - Replaces Ollama with Groq for LLM operations
-        llm = ChatGroq(  # Creates Groq chat instance
-            api_key="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",  # Groq API key for authentication
-            model_name="llama-3.3-70b-versatile",  # Specifies the Llama 3.3 70B model name
-            temperature=settings.LLM_TEMPERATURE,  # Uses configured temperature setting
-            model_kwargs={"response_format": {"type": "json_object"}} # Forces strict JSON output  # Ensures JSON response format
-        )
 
-        qa_chain = create_stuff_documents_chain(llm=llm, prompt=prompt)  # Creates QA chain with LLM and prompt
-
-        try:
-            raw = await qa_chain.ainvoke({'input': query, 'query': query, 'context': docs, 'history': history_text})  # Asynchronously invokes QA chain with inputs
-        except Exception as exc:  # Catches any exceptions during QA invocation
-            raise RuntimeError(  # Raises runtime error with detailed information
-                f"AI generation failed via Ollama ({type(exc).__name__}): {exc}. "
-                "Verify Ollama is running and the configured model is available."
-            ) from exc  # Chains original exception as cause
-
-        return self._coerce_qa_payload(raw, contexts)  # Processes and returns the QA response
+        return await self._run_qa_chain(llm, query, contexts, chat_history, 'Ollama')
 
     def _coerce_qa_payload(self, raw: object, contexts: list[dict]) -> dict:  # Converts raw response to standardized QA dictionary
         text = str(raw or '').strip()  # Converts raw response to string and strips whitespace
