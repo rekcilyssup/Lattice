@@ -294,6 +294,8 @@ def _route(query: str) -> str:  # Determines search strategy based on query
 
 
 def _dense_search(workspace_id: str, vector: str, top_k: int) -> list[dict]:  # Performs vector similarity search
+    # pgvector's <=> returns DISTANCE, not similarity: 0.0 = same direction,
+    # 1.0 = orthogonal. Hence "1 - distance" in the SELECT, so higher = better.
     with get_conn() as conn:  # Database connection context
         with conn.cursor() as cur:  # Cursor context
             cur.execute(  # Execute vector similarity search
@@ -329,16 +331,16 @@ def _sparse_search(workspace_id: str, query: str, expanded_query: str, top_k: in
                 )
                 return [dict(r) for r in cur.fetchall()]  # Return results as list of dicts
 
-    rows = _run(expanded_query)  # Try expanded query first
+    rows = _run(expanded_query)  # stage 1: intent-expanded OR-terms
     if rows:
         return rows
 
-    if expanded_query != query:  # Try original query if different
+    if expanded_query != query:  # stage 2: drop the OR-terms and retry
         rows = _run(query)
         if rows:
             return rows
 
-    with get_conn() as conn:  # Fall back to plain text query
+    with get_conn() as conn:  # stage 3: plainto_tsquery ignores boolean syntax
         with conn.cursor() as cur:
             cur.execute(
                 """
@@ -369,7 +371,7 @@ def _chat_history(workspace_id: str, limit: int = 6) -> list[dict]:  # Retrieves
                 (workspace_id, limit),
             )
             rows = [dict(r) for r in cur.fetchall()]  # Fetch all results
-    return list(reversed(rows))  # Reverse to chronological order
+    return list(reversed(rows))  # the LLM needs oldest -> newest
 
 
 def _is_title_query(query: str) -> bool:  # Checks if query is looking for document titles

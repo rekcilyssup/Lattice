@@ -18,7 +18,13 @@ type ChatResponse = {
 const parseError = async (response: Response): Promise<string> => {
   try {
     const payload = await response.json();
-    return payload?.error?.message ?? 'Request failed';
+    // FastAPI returns { detail: string | object }; legacy shape was { error: { message } }.
+    if (typeof payload?.detail === 'string') return payload.detail;
+    if (Array.isArray(payload?.detail)) {
+      return payload.detail.map((d: { msg?: string }) => d?.msg ?? JSON.stringify(d)).join('; ');
+    }
+    if (typeof payload?.detail === 'object' && payload?.detail !== null) return JSON.stringify(payload.detail);
+    return payload?.error?.message ?? payload?.message ?? 'Request failed';
   } catch (_error) {
     return `Request failed with status ${response.status}`;
   }

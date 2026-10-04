@@ -20,7 +20,7 @@ cd BackendFastAPI
 docker compose up -d
 ```
 
-2. Create env and set DB port to `5433`:
+2. Create env and set DB port to `5434`:
 
 ```bash
 cp .env.example .env

@@ -11,7 +11,7 @@ class Settings(BaseSettings):
     CORS_ORIGIN: str = 'http://localhost:3000'
 
     POSTGRES_HOST: str = '127.0.0.1'
-    POSTGRES_PORT: int = 5433
+    POSTGRES_PORT: int = 5434
     POSTGRES_DB: str = 'lattice'
     POSTGRES_USER: str = 'lattice'
     POSTGRES_PASSWORD: str = 'lattice'

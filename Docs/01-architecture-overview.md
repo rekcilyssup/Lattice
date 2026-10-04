@@ -63,11 +63,11 @@ Backend uses `pg` driver and env-based connection settings (`POSTGRES_*`).
 Docker Postgres is exposed as:
 
 - host: `127.0.0.1`
-- port: `5433` (host) -> `5432` (container)
+- port: `5434` (host) -> `5432` (container)
 
 Critical detail:
 
-- `docker-compose.yml` uses **5433** on host
+- `docker-compose.yml` uses **5434** on host
 - if backend `.env` uses 5432, it may hit your local machine Postgres instead of Docker
 
 ## Runtime Stack in this repo

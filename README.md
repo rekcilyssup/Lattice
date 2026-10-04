@@ -84,7 +84,7 @@ cd BackendFastAPI
 docker compose up -d
 ```
 
-This starts PostgreSQL (`lattice`) with `pgvector` enabled on port `5433`.
+This starts PostgreSQL (`lattice`) with `pgvector` enabled on port `5434`.
 
 ## 2) Run Backend
 
